@@ -3,7 +3,7 @@
 ## Start here
 
 - Read `docs/superpowers/specs/2026-11-02-kev-playground-design.md` before changing architecture. It is the source of truth for scope, pinned versions, and non-goals.
-- This is a macOS Apple Silicon PoC under implementation. Config, paths, Kev API validation, runtime bootstrap/prefetch, and sidecar management exist; the console and TUI are still planned.
+- This is an implemented macOS Apple Silicon PoC. The real-Kev multi-GB acceptance run is opt-in and has not yet been performed; normal tests never download models.
 
 ## Commands
 
@@ -12,6 +12,8 @@
 - `make test-web` — `node --test web/`
 - `make vet` — `go vet ./...`
 - `make build` — build `bin/gavel`
+- `make run` — launch setup/launcher TUI
+- `make e2e` — explicitly consent to real runtime/model downloads and a Metal smoke test (not CI)
 - Single Go test: `go test ./internal/version -run TestVersionDefault -v`
 - Required before a commit: `make vet && make test`.
 
@@ -36,10 +38,12 @@
 
 ## Layout
 
-- `cmd/gavel` — entrypoint (current skeleton).
-- `internal/version` — build version (current skeleton).
+- `cmd/gavel` — entrypoint, flags, setup/launcher wiring.
+- `internal/version` — build version.
 - `internal/config`, `internal/runtime`, `internal/kevapi`, `internal/sidecar` — implemented runtime foundation; tests use fakes and helper subprocesses.
-- Planned per the design doc: `internal/status`, `internal/app`, `internal/console`, `internal/tui`, `web/`.
+- `internal/status`, `internal/app`, `internal/console`, `internal/tui` — orchestration, local proxy, and launcher.
+- `web/` — embedded HTML/CSS/ES modules; pure browser logic tests.
+- `e2e/` — opt-in real-Kev smoke test.
 - `.superpowers/` is local brainstorm state; it is gitignored.
 
 ## Workflow

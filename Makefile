@@ -1,4 +1,4 @@
-.PHONY: build run test test-go test-web vet fmt clean
+.PHONY: build run test test-go test-web vet fmt clean e2e
 
 build:
 	go build -o bin/gavel ./cmd/gavel
@@ -16,6 +16,10 @@ test-web:
 
 vet:
 	go vet ./...
+
+# Explicitly opts into a multi-GB download in a temporary GAVEL_HOME.
+e2e:
+	GAVEL_E2E=1 go test ./e2e -run TestRealKev -v -timeout 50m
 
 fmt:
 	gofmt -w $$(find . -name '*.go' -not -path './.git/*')
