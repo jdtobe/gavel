@@ -110,6 +110,9 @@ func (m Model) Init() tea.Cmd {
 }
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case logLineMsg:
+		m.notice = string(msg)
+		return m, nil
 	case tickMsg:
 		s := m.deps.App.Status()
 		if s.Phase == status.PhaseError && m.screen != "setup" {
