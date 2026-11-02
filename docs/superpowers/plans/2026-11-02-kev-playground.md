@@ -304,7 +304,8 @@ git commit -m "feat: add Kev request types and validation"
   - `(*Setup).KevDir() string` — `<RuntimeDir>/kev/<KevSHA>`
   - `(*Setup).VenvPython() string` — `<KevDir>/.venv/bin/python`
   - `runtime.ModelSize(model string) (uint64, error)` — 0.8B = 1.71 GB, 4B = 8.85 GB
-  - `runtime.RequiredDisk(models []string) uint64` — selected model bytes + `RuntimeDiskBytes` (2.5 GiB: 1.5 GB runtime + 1 GiB headroom)
+  - `runtime.ModelMinMemory(model string) (uint64, error)` — 0.8B = 8 GiB, 4B = 32 GiB
+  - `runtime.RequiredDisk(models []string) (uint64, error)` — selected model bytes + `RuntimeDiskBytes` (2.5 GiB: 1.5 GB runtime + 1 GiB headroom); errors on an empty selection
 
 - [ ] **Step 1: Write the failing checksum test**
 
@@ -376,7 +377,7 @@ func TestCheckMemoryBlocks4BBelow32GB(t *testing.T) {
 }
 ```
 
-Cover: 0.8B allowed at 8 GB, blocked at 7 GB; 4B allowed at 32 GB; disk shortfall error includes required/free bytes; `ModelSize` returns the sizes above and an error for an unknown model; `RequiredDisk` sums selected sizes once and rejects an empty selection.
+Cover: 0.8B allowed at 8 GB, blocked at 7 GB; 4B allowed at 32 GB; disk shortfall error includes required/free bytes; `ModelSize` returns the sizes above and an error for an unknown model; `ModelMinMemory` returns the thresholds; `RequiredDisk` sums selected sizes once and returns an error for an empty selection.
 
 - [ ] **Step 7: Add `golang.org/x/sys` and implement disk/memory checks**
 
