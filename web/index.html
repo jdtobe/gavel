@@ -1,2 +1,22 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><title>Gavel — Kev playground</title><link rel="stylesheet" href="/static/styles.css"></head><body><h1>Gavel — Kev playground</h1><p>Console under construction.</p><script type="module" src="/static/app.js"></script></body></html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Gavel — Kev playground</title>
+	<link rel="stylesheet" href="/static/styles.css">
+	<link rel="modulepreload" href="/static/model.js">
+</head>
+<body>
+	<header><div><h1>Gavel <span>Kev playground</span></h1><p id="status" role="status">Connecting to local runtime…</p></div><nav><button id="raw-toggle" aria-controls="raw" aria-expanded="false">Raw JSON</button><button id="preset">Preset</button></nav></header>
+	<div id="error" role="alert" hidden></div>
+	<main>
+		<section aria-labelledby="state-title"><h2 id="state-title"><span>01</span> State</h2><p class="hint">The context Kev should evaluate. Plain text, not a conversation.</p><label for="state">State to evaluate</label><textarea id="state" placeholder="My shoes arrived late, in the wrong size, and my card was charged twice."></textarea><div class="meta"><span id="characters">0 characters</span><span id="state-error" class="validation"></span></div></section>
+		<section aria-labelledby="questions-title"><h2 id="questions-title"><span>02</span> Questions</h2><p class="hint">Ask for a probability, a choice, or a score.</p><div id="questions"></div><div class="actions"><label for="new-type">Question type</label><select id="new-type"><option value="noul">noul · true / false</option><option value="choice">choice · pick one</option><option value="score">score · ordered scale</option></select><button id="add">+ Add question</button></div><p id="validation" class="validation" role="status"></p><button id="run" class="primary" disabled>Run <kbd>⌘ ↵</kbd></button></section>
+		<section aria-labelledby="answers-title"><h2 id="answers-title"><span>03</span> Answers</h2><p class="hint">Typed decisions and their calibrated distributions.</p><div id="answers" aria-live="polite"><p class="empty">Run your questions to see an answer for each one.</p></div></section>
+	</main>
+	<footer id="usage">Local only · No generated text · No saved history</footer>
+	<aside id="raw" hidden><h2>Exact request & response</h2><pre id="raw-json">No request yet.</pre></aside>
+	<script type="module" src="/static/app.js"></script>
+</body>
+</html>

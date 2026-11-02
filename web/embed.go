@@ -5,5 +5,5 @@ import "embed"
 
 // FS contains public browser assets only, never test or Go sources.
 //
-//go:embed index.html styles.css app.js
+//go:embed index.html styles.css app.js model.js
 var FS embed.FS
