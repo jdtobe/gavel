@@ -3,7 +3,7 @@
 ## Start here
 
 - Read `docs/superpowers/specs/2026-11-02-kev-playground-design.md` before changing architecture. It is the source of truth for scope, pinned versions, and non-goals.
-- This is a macOS Apple Silicon PoC. It is pre-implementation: only the entrypoint and version package exist.
+- This is a macOS Apple Silicon PoC under implementation. Config, paths, Kev API validation, runtime bootstrap/prefetch, and sidecar management exist; the console and TUI are still planned.
 
 ## Commands
 
@@ -32,12 +32,14 @@
 - The browser UI has no Node build step: plain HTML/CSS/ES modules embedded with `go:embed`. Keep pure logic in `web/model.js` for `node --test`.
 - Use `uv sync --frozen`; do not silently fall back to unpinned dependencies.
 - `GAVEL_HOME` overrides app data paths. Unit tests must use temp dirs and must never download models.
+- Offline after setup: the sidecar forces `HF_HUB_OFFLINE=1` and `TRANSFORMERS_OFFLINE=1`. Only explicit setup/prefetch enables network downloads.
 
 ## Layout
 
 - `cmd/gavel` — entrypoint (current skeleton).
 - `internal/version` — build version (current skeleton).
-- Planned per the design doc: `internal/runtime`, `internal/sidecar`, `internal/kevapi`, `internal/console`, `internal/tui`, `web/`.
+- `internal/config`, `internal/runtime`, `internal/kevapi`, `internal/sidecar` — implemented runtime foundation; tests use fakes and helper subprocesses.
+- Planned per the design doc: `internal/status`, `internal/app`, `internal/console`, `internal/tui`, `web/`.
 - `.superpowers/` is local brainstorm state; it is gitignored.
 
 ## Workflow
