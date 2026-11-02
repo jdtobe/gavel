@@ -3,7 +3,7 @@
 ## Start here
 
 - Read `docs/superpowers/specs/2026-11-02-kev-playground-design.md` before changing architecture. It is the source of truth for scope, pinned versions, and non-goals.
-- This is an implemented macOS Apple Silicon PoC. The real-Kev multi-GB acceptance run is opt-in and has not yet been performed; normal tests never download models.
+- This is an implemented macOS Apple Silicon PoC. Real Kev-0.8B acceptance passed on M1 Max/64 GiB using MLX/bfloat16, including offline restart, incomplete-cache failure, and shutdown. See `docs/acceptance/2026-11-02-kev-08b.md`. Normal tests never download models; real e2e remains opt-in.
 
 ## Commands
 
@@ -41,6 +41,7 @@
 - `cmd/gavel` — entrypoint, flags, setup/launcher wiring.
 - `internal/version` — build version.
 - `internal/config`, `internal/runtime`, `internal/kevapi`, `internal/sidecar` — implemented runtime foundation; tests use fakes and helper subprocesses.
+- `internal/runtime/testdata/prefetch_helper_test.py` — dependency-free Python helper regressions, invoked by Go tests when `python3` is available.
 - `internal/status`, `internal/app`, `internal/console`, `internal/tui` — orchestration, local proxy, and launcher.
 - `web/` — embedded HTML/CSS/ES modules; pure browser logic tests.
 - `e2e/` — opt-in real-Kev smoke test.

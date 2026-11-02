@@ -4,8 +4,11 @@ A local Kev playground for macOS on Apple Silicon. One Go binary manages a pinne
 `uv`/Python/Kev sidecar and serves a three-column browser console for typed
 decisions.
 
-**Status:** implemented PoC; automated tests and a stub-backed browser smoke test
-pass. The multi-GB real-Kev acceptance run remains opt-in. The design is in
+**Status:** implemented PoC; automated tests, a stub-backed browser smoke test,
+and real Kev-0.8B acceptance on Apple Silicon pass. Real acceptance includes
+MLX/bfloat16 inference, offline restart, missing-cache recovery, and shutdown.
+The multi-GB test remains opt-in. [Acceptance evidence](docs/acceptance/2026-11-02-kev-08b.md).
+The design is in
 [`docs/superpowers/specs/2026-11-02-kev-playground-design.md`](docs/superpowers/specs/2026-11-02-kev-playground-design.md).
 
 ## What it does
@@ -66,8 +69,11 @@ make e2e         # opt-in: real runtime/model downloads into a temp directory
 
 `make e2e` explicitly opts into a multi-GB download; it is skipped in normal tests
 and CI. It builds a fresh runtime, starts Kev, submits all three question types,
-and verifies clean shutdown. Unit tests use temporary paths and fake commands or
-small helper processes instead of real models.
+checks offline restart/missing-cache failure, and verifies clean shutdown. Each
+run uses a fresh temporary home and removes the downloaded runtime/model cache
+when finished; repeated runs download again. Unit tests use temporary paths and
+fake commands or small helper processes instead of real models. If `python3` is
+available, Go tests also run dependency-free Python helper regression tests.
 
 Run one Go test:
 
