@@ -1,7 +1,7 @@
 # Gavel — Kev Playground Design
 
 **Date:** 2026-11-02
-**Status:** Draft for approval
+**Status:** Approved (2026-11-02)
 **Repo:** `github.com/jdtobe/gavel`
 **Target:** macOS on Apple Silicon (arm64), Go 1.27+
 
@@ -48,6 +48,7 @@ The PoC exists to make that loop fast to try on a laptop. It is not a chat UI an
 - A generic chat box that implies Kev writes text.
 - Requiring Docker or Apple `container` for the fast path.
 - Silent network access or telemetry.
+- Contacting Hugging Face on ordinary launches after setup is complete.
 
 ## Constraints and verified facts
 
@@ -167,6 +168,10 @@ Steps are idempotent and resumable. Each completed step writes a small marker JS
    The TUI aggregates bytes across files for a per-model progress bar. If structured progress is unavailable, it falls back to an indeterminate spinner plus the last log line.
 6. **Start sidecar.** Launch `kev.serve` (see below) and poll `GET /v1/models` until ready.
 
+### Network policy
+
+Gavel is online only during explicit setup/download. Once the runtime and selected models are cached, the sidecar starts with `HF_HUB_OFFLINE=1` and `TRANSFORMERS_OFFLINE=1`; ordinary launches make no Hugging Face requests. If the cache is incomplete, the sidecar fails with a clear "model cache incomplete; re-run setup" error and a route back to Setup. There is no silent online fallback. A future "check for updates" action can opt into network access explicitly.
+
 `uv sync --frozen` is the primary path. If the lockfile cannot resolve on this platform, surface the exact `uv` error and stop; do not silently fall back to unpinned dependencies. A future version can add an explicit "retry unpinned" option.
 
 ### Disk space
@@ -203,6 +208,8 @@ Shown only when something required is missing.
 - `q` or `ctrl+c` quits.
 - If a model is already cached, it is marked `✓ downloaded` and cannot be unchecked in a way that deletes it.
 - Disk shortfall disables the download action and prints the required/free numbers.
+- Unified memory: Kev-4B requires at least 32 GB and is disabled below that; Kev-0.8B requires at least 8 GB. Show total RAM and the reason when a model is disabled.
+- If a model fails to download or load, `esc` returns to Setup with completed caches intact, so another model can be chosen.
 
 ### Screen 2 — Downloading
 
@@ -219,7 +226,8 @@ Shown only when something required is missing.
 - One row per selected item: runtime, then each selected model.
 - Current file name shown under the active model.
 - `l` toggles a log viewport. `esc` cancels: kill running child commands, keep completed caches, return to Setup with a "cancelled" notice.
-- Errors keep the completed items and show the failing command plus the last 20 log lines; `r` retries.
+- Errors keep the completed items and show the failing command plus the last 20 log lines; `r` retries and `esc` returns to Setup.
+- The active model is written to config only after `kev.serve` reports ready. A failed first start leaves the previous active model untouched.
 - When downloads finish, the same screen shows "Starting Kev…" and then transitions to Ready.
 
 ### Screen 3 — Ready
@@ -237,24 +245,27 @@ Shown only when something required is missing.
 ```
 
 - `o` runs `open <console-url>` (macOS). If `open` fails, print the URL and keep the TUI usable.
-- `r` stops and restarts the sidecar with the active model.
+- `r` stops accepting new requests, waits up to 30 seconds for in-flight requests to finish, then cancels and restarts the sidecar with the active model.
 - `l` opens a scrollable log viewport (`esc` returns).
 - `q` stops the sidecar cleanly and exits.
-- If the sidecar exits unexpectedly, show the exit code and last log lines; `r` restarts.
+- If the sidecar exits unexpectedly, show the exit code and last log lines; the error screen offers `r` restart, `m` model/setup, `l` logs, and `q` quit.
 - The status line reports backend and precision from `/v1/models` (e.g., `MLX · bfloat16`).
 
 ### Screen 4 — Manage models
 
 Reached with `m`.
 
+- Reachable from Ready and from any error screen with `m`.
 - Lists available models with size, cached status, and an `active` marker.
 - `space` selects additional models to download; `enter` on a cached model switches the active model and restarts the sidecar.
+- Switching models writes config only after the new sidecar reports ready; if it fails, the previous active model remains selected.
 - `d` is **not** included in the PoC; deleting multi-GB caches is too easy to do by accident.
 - `esc` returns to Ready.
 
 ### TUI behavior details
 
-- Startup checks happen before the first screen; a failure becomes an error screen with `r` retry, `l` logs, `q` quit.
+- The Go console HTTP server starts at launch, before setup. The TUI can show its URL during setup, downloading, starting, and error states, so the browser can display progress; Run stays disabled until Ready.
+- Startup checks happen before the first screen; a failure becomes an error screen with `r` retry, `m` model/setup, `l` logs, `q` quit.
 - The TUI never blocks the event loop on downloads or process waits; Bubble Tea commands run them and return messages.
 - All child commands receive a context tied to the current screen; `esc` cancels it.
 - Logs are ANSI-stripped for display and also appended to `logs/kev.log`.
@@ -279,6 +290,7 @@ Served from Go's embedded filesystem. No Node build step for the PoC: plain HTML
 ```
 
 - Header: app/model name, server status, raw JSON toggle, preset button.
+- Opened before Ready, the console shows the current setup/download/start phase and keeps Run disabled.
 - Footer: total latency, input tokens, output tokens, request id (when returned).
 - Columns are fixed-width flex columns with independent scroll. Minimum usable width ~1100 px; below that, columns stack vertically in source order.
 
@@ -372,6 +384,12 @@ Request body from the console:
 - Timeout: 5 minutes (large states can be slow on first use). Browser cancellation propagates.
 - Request body limit: 10 MB.
 
+### Concurrency and restart
+
+- The console allows multiple tabs and concurrent requests; Go passes them through and Kev batches them. There is no Go-side queue or mutex.
+- During a sidecar restart or model switch, new requests return `503`; in-flight requests get up to 30 seconds to finish before the sidecar is stopped.
+- Browser cancellation propagates to the upstream request context.
+
 ### Static files
 
 `GET /` serves the console; `/static/*` serves CSS/JS. Assets are embedded with `go:embed`. The console server binds `127.0.0.1:0` and reports its actual port to the TUI.
@@ -382,11 +400,14 @@ Request body from the console:
 - Environment:
   - `PYTHONUNBUFFERED=1`
   - `HF_HOME=<cache>/huggingface`
+  - `HF_HUB_OFFLINE=1`
+  - `TRANSFORMERS_OFFLINE=1`
   - `HF_HUB_DISABLE_TELEMETRY=1`
   - `TOKENIZERS_PARALLELISM=false`
   - `KEV_BACKEND=auto` (Kev chooses MLX on Apple Silicon)
 - Health: poll `GET /v1/models` every 500 ms. Allow up to 10 minutes on first load; the TUI shows "Starting Kev…" and the last log line.
 - Shutdown: send `SIGTERM` to the process group, wait 10 s, then `SIGKILL`. Reap the child and close pipes.
+- Orphan handling: write `<runtime>/sidecar.json` with the PID and process group as soon as the child starts; remove it on clean stop. On launch, if the PID is alive and its command matches, terminate it before starting a new sidecar.
 - Logs: stdout/stderr are scanned line by line into a 1,000-line ring buffer (ANSI stripped) and appended to `logs/kev.log`.
 - Duplicate instances: acquire an exclusive `flock` on `<runtime>/gavel.lock`. If held, exit with "Gavel is already running" and the console URL if it can be discovered. The lock is released on exit. Stale locks are detected by PID liveness.
 
@@ -399,7 +420,11 @@ Request body from the console:
 | `uv sync` failure | Show the exact command, exit code, and last 20 log lines |
 | Disk full | Pre-download check; runtime errors also surface the OS message |
 | Model download interrupted | Keep the HF cache; retry resumes |
-| `kev.serve` exits during startup | Show exit code and log tail; `r` retries |
+| Model cache incomplete at launch (offline mode) | Fail with "model cache incomplete; re-run setup"; no online fallback |
+| `kev.serve` exits during startup | Show exit code and log tail; `r` retries, `esc`/`m` returns to Setup |
+| Model fails to load (OOM or bad checkpoint) | Error screen; `esc`/`m` returns to Setup; the previous active model remains selected |
+| Restart requested during a run | Stop accepting new requests; wait up to 30 s for in-flight work, then restart |
+| Gavel killed / terminal closed | On next launch, reap the recorded sidecar process group before starting |
 | `kev.serve` exits while ready | Header shows error; `r` restarts |
 | Console request while starting | `503` with `{"detail":"Kev is still starting"}` |
 | Kev `422` (e.g. state too long) | Pass through to the browser; show the detail |
@@ -481,7 +506,14 @@ go vet ./...
 - No draft persistence; the preset covers the empty first run.
 - No model deletion in the PoC.
 - `uv sync --frozen` is strict; no silent unpinned fallback.
+- Offline by default after setup: sidecar runs with `HF_HUB_OFFLINE=1` and `TRANSFORMERS_OFFLINE=1`; no Hub checks on ordinary launches.
+- The console HTTP server starts at launch; the browser can show setup progress, but Run stays disabled until Ready.
+- Kev-4B requires at least 32 GB unified memory; Kev-0.8B requires at least 8 GB.
+- Restart waits up to 30 seconds for in-flight requests, then cancels.
+- Active model config is written only after a successful sidecar start.
+- Orphaned sidecars are reaped on the next launch via a PID/process-group state file.
+- Every error screen offers a way back to model selection/setup.
 
 ## Open questions for the human partner
 
-None blocking.
+None blocking. Offline-by-default confirmed 2026-11-02.
