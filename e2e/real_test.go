@@ -121,12 +121,25 @@ func TestRealKev(t *testing.T) {
 	if err := manager.Stop(ctx); err != nil {
 		t.Fatal(err)
 	}
+	if exited, _ := manager.ExitError(); !exited {
+		t.Fatal("healthy MLX sidecar survived shutdown after offline inference")
+	}
+	if _, err := os.Stat(p.SidecarStateFile); !os.IsNotExist(err) {
+		t.Fatalf("healthy-sidecar shutdown left process state: %v", err)
+	}
+	t.Log("Verified shutdown/reaping of the healthy MLX sidecar after offline inference")
 	manager.Paths.HFHome = t.TempDir()
 	missingCtx, missingCancel := context.WithTimeout(ctx, 90*time.Second)
 	err = a.Restart(missingCtx)
 	missingCancel()
 	if err == nil || !strings.Contains(err.Error(), "re-run setup") {
 		t.Fatalf("missing cache should fail with setup guidance: %v", err)
+	}
+	if exited, _ := manager.ExitError(); !exited {
+		t.Fatal("failed offline start left its child running")
+	}
+	if _, err := os.Stat(p.SidecarStateFile); !os.IsNotExist(err) {
+		t.Fatalf("failed offline start left process state: %v", err)
 	}
 	if networkAttempts.Load() != 0 {
 		t.Fatalf("incomplete offline cache attempted %d external HTTP requests", networkAttempts.Load())
