@@ -133,14 +133,23 @@ func TestStartArgumentsAndOfflineEnvironment(t *testing.T) {
 }
 
 func TestUnexpectedExit(t *testing.T) {
-	m := newManager(t, true)
+	m := newManager(t, false)
 	if err := m.Start(context.Background(), "model", freePort(t)); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { m.Stop(context.Background()) })
+	// Crash only after Start has recorded the process identity. An immediately
+	// exiting helper can disappear before WriteState's ps call, testing a startup
+	// failure rather than WaitReady's unexpected-exit detection.
+	if err := syscall.Kill(-m.cmd.Process.Pid, syscall.SIGKILL); err != nil {
+		t.Fatal(err)
+	}
 	_, err := m.WaitReady(context.Background(), 5*time.Second)
 	if err == nil || !strings.Contains(err.Error(), "exit") {
 		t.Fatalf("err = %v", err)
+	}
+	if _, err := os.Stat(m.Paths.SidecarStateFile); err != nil {
+		t.Fatalf("process state was not recorded before the crash: %v", err)
 	}
 }
 
