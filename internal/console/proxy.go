@@ -2,12 +2,14 @@ package console
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
 
 	"github.com/jdtobe/gavel/internal/kevapi"
+	"github.com/jdtobe/gavel/internal/status"
 )
 
 func (s *Server) systemone(w http.ResponseWriter, r *http.Request) {
@@ -54,7 +56,17 @@ func (s *Server) models(w http.ResponseWriter, r *http.Request) {
 	s.proxy(w, r, "/v1/models", nil)
 }
 func (s *Server) proxy(w http.ResponseWriter, r *http.Request, path string, body []byte) {
-	req, err := http.NewRequestWithContext(r.Context(), r.Method, s.upstream()+path, bytes.NewReader(body))
+	ctx, cancel := context.WithCancelCause(r.Context())
+	s.mu.Lock()
+	s.nextID++
+	id := s.nextID
+	s.cancels[id] = cancel
+	if s.provider.Status().Phase != status.PhaseReady {
+		cancel(errRestart)
+	}
+	s.mu.Unlock()
+	defer func() { s.mu.Lock(); delete(s.cancels, id); s.mu.Unlock(); cancel(nil) }()
+	req, err := http.NewRequestWithContext(ctx, r.Method, s.upstream()+path, bytes.NewReader(body))
 	if err != nil {
 		detail(w, 502, err)
 		return
@@ -64,15 +76,30 @@ func (s *Server) proxy(w http.ResponseWriter, r *http.Request, path string, body
 	}
 	resp, err := s.client.Do(req)
 	if err != nil {
+		if errors.Is(context.Cause(ctx), errRestart) {
+			detail(w, 503, errRestart)
+			return
+		}
 		detail(w, 502, err)
 		return
 	}
 	defer resp.Body.Close()
+	// Kev returns a non-streaming JSON response. Buffer before committing the
+	// status so a restart during body receipt still produces a clean 503.
+	responseBody, err := io.ReadAll(resp.Body)
+	if errors.Is(context.Cause(ctx), errRestart) {
+		detail(w, 503, errRestart)
+		return
+	}
+	if err != nil {
+		detail(w, 502, err)
+		return
+	}
 	for _, key := range []string{"Content-Type", "x-typesafe-request-id"} {
 		if value := resp.Header.Get(key); value != "" {
 			w.Header().Set(key, value)
 		}
 	}
 	w.WriteHeader(resp.StatusCode)
-	io.Copy(w, resp.Body)
+	w.Write(responseBody)
 }

@@ -84,6 +84,15 @@ func TestSetupGuards(t *testing.T) {
 		t.Fatal(m.View())
 	}
 }
+
+func TestCachedRecoveryNeedsOnlyHeadroom(t *testing.T) {
+	m := testModel(64<<30, 1<<30)
+	m.cached[appruntime.Model08B] = true
+	m.deps.RuntimeInstalled = true
+	if !m.canDownload() {
+		t.Fatal("cached recovery blocked by full download accounting")
+	}
+}
 func TestEnterStartsSelectedModels(t *testing.T) {
 	m := testModel(64<<30, 1<<40)
 	next, cmd := key(m, "enter")

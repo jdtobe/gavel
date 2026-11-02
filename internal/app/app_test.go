@@ -18,9 +18,13 @@ import (
 )
 
 type fakeRuntime struct {
-	calls []string
-	err   error
+	calls     []string
+	err       error
+	required  uint64
+	installed bool
 }
+
+func (f *fakeRuntime) Installed() bool { return f.installed }
 
 func (f *fakeRuntime) EnsureUV(context.Context) error { f.calls = append(f.calls, "uv"); return f.err }
 func (f *fakeRuntime) EnsurePython(context.Context) error {
@@ -38,20 +42,23 @@ func (f *fakeRuntime) Prefetch(ctx context.Context, m string, cb func(appruntime
 	}
 	return f.err
 }
-func (f *fakeRuntime) CheckDisk(string, uint64) error {
+func (f *fakeRuntime) CheckDisk(_ string, required uint64) error {
+	f.required = required
 	f.calls = append(f.calls, "disk")
 	return f.err
 }
 func (f *fakeRuntime) CheckMemory(string) error { f.calls = append(f.calls, "memory"); return f.err }
 
 type fakeSidecar struct {
-	err     error
-	starts  []string
-	stops   int
-	onReady func()
+	processContext context.Context
+	err            error
+	starts         []string
+	stops          int
+	onReady        func()
 }
 
 func (s *fakeSidecar) Start(ctx context.Context, m string, p int) error {
+	s.processContext = ctx
 	s.starts = append(s.starts, m)
 	return s.err
 }
@@ -61,9 +68,15 @@ func (s *fakeSidecar) WaitReady(context.Context, time.Duration) (sidecar.ModelIn
 	}
 	return sidecar.ModelInfo{Name: "kev-latest", Backend: "mlx", Dtype: "bfloat16"}, s.err
 }
-func (s *fakeSidecar) Stop(context.Context) error { s.stops++; return nil }
-func (s *fakeSidecar) URL() string                { return "http://127.0.0.1:1234" }
-func (s *fakeSidecar) Logs() []string             { return []string{"log"} }
+func (s *fakeSidecar) Stop(context.Context) error {
+	s.stops++
+	if s.processContext != nil && s.processContext.Err() != nil {
+		return errors.New("cancelled before graceful stop")
+	}
+	return nil
+}
+func (s *fakeSidecar) URL() string    { return "http://127.0.0.1:1234" }
+func (s *fakeSidecar) Logs() []string { return []string{"log"} }
 
 type fakeConsole struct {
 	starts int
@@ -84,6 +97,70 @@ func newTestApp(t *testing.T) *App {
 	t.Helper()
 	p, _ := appruntime.ResolvePathsAt(t.TempDir())
 	return New(Deps{Paths: p, Config: config.Default(), Runtime: &fakeRuntime{}, Sidecar: &fakeSidecar{}, Console: &fakeConsole{}})
+}
+
+func TestStopPreservesGracefulSidecarContext(t *testing.T) {
+	a := newTestApp(t)
+	if err := a.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.Stop(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}
+func TestRecoverySelectsRequestedCachedModel(t *testing.T) {
+	a := newTestApp(t)
+	a.cfg.Model = appruntime.Model4B
+	a.cfg.DownloadedModels = []string{appruntime.Model08B, appruntime.Model4B}
+	if err := a.Setup(context.Background(), []string{appruntime.Model08B}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := a.deps.Sidecar.(*fakeSidecar).starts; len(got) != 1 || got[0] != appruntime.Model08B {
+		t.Fatal(got)
+	}
+}
+func TestRecoveryDiskExcludesCachedWeights(t *testing.T) {
+	a := newTestApp(t)
+	a.deps.Runtime.(*fakeRuntime).installed = true
+	a.cfg.DownloadedModels = []string{appruntime.Model08B}
+	if err := a.Setup(context.Background(), []string{appruntime.Model08B}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := a.deps.Runtime.(*fakeRuntime).required; got != 1<<30 {
+		t.Fatalf("required %d includes cached model", got)
+	}
+}
+
+type cancelRuntime struct {
+	fakeRuntime
+	entered chan struct{}
+}
+
+func (r *cancelRuntime) EnsureUV(ctx context.Context) error {
+	close(r.entered)
+	<-ctx.Done()
+	return ctx.Err()
+}
+func TestStopCancelsSetup(t *testing.T) {
+	a := newTestApp(t)
+	r := &cancelRuntime{entered: make(chan struct{})}
+	a.deps.Runtime = r
+	setupDone := make(chan error, 1)
+	go func() { setupDone <- a.Setup(context.Background(), []string{appruntime.Model08B}, nil) }()
+	<-r.entered
+	stopped := make(chan error, 1)
+	go func() { stopped <- a.Stop(context.Background()) }()
+	select {
+	case err := <-stopped:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Stop blocked behind uncancelled setup")
+	}
+	if err := <-setupDone; !errors.Is(err, context.Canceled) {
+		t.Fatal(err)
+	}
 }
 
 func TestSetupTransitionsToReady(t *testing.T) {

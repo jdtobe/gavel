@@ -4,6 +4,7 @@ package console
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -23,13 +24,26 @@ type Server struct {
 	mu       sync.Mutex
 	inflight int
 	changed  chan struct{}
+	cancels  map[uint64]context.CancelCauseFunc
+	nextID   uint64
 }
 
 func New(provider status.Provider, upstream func() string, client *http.Client) *Server {
 	if client == nil {
 		client = &http.Client{Timeout: 5 * time.Minute}
 	}
-	return &Server{provider: provider, upstream: upstream, client: client, changed: make(chan struct{})}
+	return &Server{provider: provider, upstream: upstream, client: client, changed: make(chan struct{}), cancels: make(map[uint64]context.CancelCauseFunc)}
+}
+
+var errRestart = errors.New("Kev is restarting; retry the request")
+
+// CancelInflight cancels requests that exceeded the restart grace period.
+func (s *Server) CancelInflight() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, cancel := range s.cancels {
+		cancel(errRestart)
+	}
 }
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()

@@ -29,12 +29,13 @@ type App interface {
 	OpenConsole() error
 }
 type Deps struct {
-	App         App
-	OpenBrowser func(string) error
-	MemoryBytes func() (uint64, error)
-	DiskFree    func(string) (uint64, error)
-	DiskPath    string
-	AutoStart   bool
+	App              App
+	OpenBrowser      func(string) error
+	MemoryBytes      func() (uint64, error)
+	DiskFree         func(string) (uint64, error)
+	DiskPath         string
+	AutoStart        bool
+	RuntimeInstalled bool
 }
 type Model struct {
 	deps         Deps
@@ -174,7 +175,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.screen == "error" {
 			switch msg.String() {
 			case "m":
-				m.screen = "setup"
+				m.screen = "manage"
 				return m, nil
 			case "r":
 				return m.beginSetup()
@@ -226,6 +227,15 @@ func (m Model) chosen() []string {
 func (m Model) canDownload() bool {
 	models := m.chosen()
 	required, err := appruntime.RequiredDisk(models)
+	if err == nil && m.deps.RuntimeInstalled {
+		required -= appruntime.RuntimeDiskBytes - (1 << 30)
+	}
+	for _, id := range models {
+		if m.cached[id] {
+			size, _ := appruntime.ModelSize(id)
+			required -= size
+		}
+	}
 	if err != nil || required > m.free {
 		return false
 	}

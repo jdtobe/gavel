@@ -288,6 +288,12 @@ func TestEnsureKevSkipsWhenMarkerMatches(t *testing.T) {
 		t.Fatal(err)
 	}
 	marker := `{"sha":"` + DefaultPins().KevSHA + `"}`
+	if err := os.MkdirAll(filepath.Dir(s.VenvPython()), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(s.VenvPython(), []byte("python"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(filepath.Join(kevDir, ".gavel-installed"), []byte(marker), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -299,6 +305,23 @@ func TestEnsureKevSkipsWhenMarkerMatches(t *testing.T) {
 	}
 	if got := len(s.Runner.(*fakeRunner).calls); got != 0 {
 		t.Fatalf("runner calls = %d", got)
+	}
+}
+
+func TestEnsureKevRepairsMissingVenv(t *testing.T) {
+	s := newTestSetup(t)
+	s.Fetcher = &fakeFetcher{body: kevTarGz(t)}
+	if err := os.MkdirAll(s.KevDir(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(s.KevDir(), ".gavel-installed"), []byte(`{"sha":"`+s.Pins.KevSHA+`"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.EnsureKev(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(s.Runner.(*fakeRunner).calls) != 1 {
+		t.Fatal("missing venv was not repaired")
 	}
 }
 

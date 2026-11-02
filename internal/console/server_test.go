@@ -203,3 +203,80 @@ func TestModels(t *testing.T) {
 		}
 	}
 }
+
+func TestRestartCancellationReturns503(t *testing.T) {
+	entered := make(chan struct{}, 2)
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		io.Copy(io.Discard, r.Body)
+		entered <- struct{}{}
+		if r.Header.Get("unused") == "" {
+			<-r.Context().Done()
+		}
+	}))
+	defer up.Close()
+	s := New(readyProvider(), func() string { return up.URL }, nil)
+	codes := make(chan int, 2)
+	for range 2 {
+		go func() {
+			rr := httptest.NewRecorder()
+			s.Handler().ServeHTTP(rr, httptest.NewRequest("POST", "/api/systemone", strings.NewReader(validBody)))
+			codes <- rr.Code
+		}()
+	}
+	for range 2 {
+		<-entered
+	}
+	s.CancelInflight()
+	for range 2 {
+		select {
+		case code := <-codes:
+			if code != 503 {
+				t.Fatalf("restart cancellation returned %d", code)
+			}
+		case <-time.After(time.Second):
+			t.Fatal("request did not cancel")
+		}
+	}
+	if err := s.WaitIdle(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+type cancelledBody struct {
+	ctx     context.Context
+	entered chan struct{}
+}
+
+func (b cancelledBody) Read([]byte) (int, error) {
+	close(b.entered)
+	<-b.ctx.Done()
+	return 0, b.ctx.Err()
+}
+func (b cancelledBody) Close() error { return nil }
+func TestRestartCancelsResponseBodyBeforeCommittingStatus(t *testing.T) {
+	entered := make(chan struct{})
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: cancelledBody{r.Context(), entered}}, nil
+	})}
+	s := New(readyProvider(), func() string { return "http://unused" }, client)
+	done := make(chan int, 1)
+	go func() {
+		rr := httptest.NewRecorder()
+		s.Handler().ServeHTTP(rr, httptest.NewRequest("POST", "/api/systemone", strings.NewReader(validBody)))
+		done <- rr.Code
+	}()
+	<-entered
+	s.CancelInflight()
+	select {
+	case code := <-done:
+		if code != 503 {
+			t.Fatalf("partial response returned %d instead of 503", code)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("body not cancelled")
+	}
+}

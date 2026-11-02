@@ -104,7 +104,7 @@ func runWith(args []string, options runOptions) error {
 	return options.launch(ctx, a, setup, auto)
 }
 func launchTUI(ctx context.Context, a *app.App, s *appruntime.Setup, auto bool) error {
-	m := tui.New(tui.Deps{App: a, MemoryBytes: s.MemoryBytes, DiskFree: s.DiskFree, DiskPath: s.Paths.RuntimeDir, AutoStart: auto})
+	m := tui.New(tui.Deps{App: a, MemoryBytes: s.MemoryBytes, DiskFree: s.DiskFree, DiskPath: s.Paths.RuntimeDir, AutoStart: auto, RuntimeInstalled: s.Installed()})
 	_, err := tea.NewProgram(m, tea.WithAltScreen(), tea.WithContext(ctx)).Run()
 	return err
 }

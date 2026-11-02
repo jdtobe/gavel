@@ -93,7 +93,7 @@ func (s *Setup) EnsurePython(ctx context.Context) error {
 // EnsureKev downloads the pinned Kev source and syncs its locked dependencies.
 func (s *Setup) EnsureKev(ctx context.Context) error {
 	kevDir := s.KevDir()
-	if s.kevMarkerValid(kevDir) {
+	if info, err := os.Stat(s.VenvPython()); s.kevMarkerValid(kevDir) && err == nil && !info.IsDir() {
 		return nil
 	}
 

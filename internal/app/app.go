@@ -53,6 +53,8 @@ type App struct {
 	consoleURL string
 	lifetime   context.Context
 	cancel     context.CancelFunc
+	work       context.Context
+	cancelWork context.CancelFunc
 }
 
 func New(deps Deps) *App {
@@ -64,6 +66,7 @@ func New(deps Deps) *App {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	a := &App{deps: deps, cfg: deps.Config, state: status.Status{Phase: status.PhaseSetup, Model: deps.Config.Model}, lifetime: ctx, cancel: cancel}
+	a.work, a.cancelWork = context.WithCancel(context.Background())
 	if a.deps.Console == nil {
 		a.deps.Console = console.New(a, deps.Sidecar.URL, nil)
 	}
@@ -96,11 +99,26 @@ func (a *App) fail(err error) error {
 	return err
 }
 func (a *App) Setup(ctx context.Context, models []string, cb func(appruntime.PrefetchProgress)) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	stop := context.AfterFunc(a.work, cancel)
+	defer stop()
 	a.op.Lock()
 	defer a.op.Unlock()
 	need, err := appruntime.RequiredDisk(models)
 	if err != nil {
 		return a.fail(err)
+	}
+	a.mu.Lock()
+	for _, m := range models {
+		if contains(a.cfg.DownloadedModels, m) {
+			size, _ := appruntime.ModelSize(m)
+			need -= size
+		}
+	}
+	a.mu.Unlock()
+	if installed, ok := a.deps.Runtime.(interface{ Installed() bool }); ok && installed.Installed() {
+		need -= appruntime.RuntimeDiskBytes - (1 << 30)
 	}
 	if err := os.MkdirAll(a.deps.Paths.RuntimeDir, 0o700); err != nil {
 		return a.fail(err)
@@ -137,13 +155,17 @@ func (a *App) Setup(ctx context.Context, models []string, cb func(appruntime.Pre
 	}
 	a.mu.Lock()
 	model := a.cfg.Model
-	if !contains(a.cfg.DownloadedModels, model) {
+	if !contains(models, model) {
 		model = models[0]
 	}
 	a.mu.Unlock()
 	return a.start(ctx, model)
 }
 func (a *App) Start(ctx context.Context) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	stop := context.AfterFunc(a.work, cancel)
+	defer stop()
 	a.op.Lock()
 	defer a.op.Unlock()
 	a.mu.Lock()
@@ -191,7 +213,11 @@ func (a *App) drainStop(ctx context.Context) error {
 	a.phase(status.PhaseStopping)
 	grace, cancel := context.WithTimeout(ctx, restartGrace)
 	defer cancel()
-	a.deps.Console.WaitIdle(grace)
+	if err := a.deps.Console.WaitIdle(grace); err != nil {
+		if canceller, ok := a.deps.Console.(interface{ CancelInflight() }); ok {
+			canceller.CancelInflight()
+		}
+	}
 	return a.deps.Sidecar.Stop(ctx)
 }
 func (a *App) Restart(ctx context.Context) error {
@@ -261,9 +287,11 @@ func (a *App) StartConsole(ctx context.Context) (string, error) {
 func (a *App) ConsoleURL() string { a.mu.Lock(); defer a.mu.Unlock(); return a.consoleURL }
 func (a *App) OpenConsole() error { return exec.Command("open", a.ConsoleURL()).Run() }
 func (a *App) Stop(ctx context.Context) error {
-	a.cancel()
+	a.cancelWork()
 	a.op.Lock()
 	defer a.op.Unlock()
 	a.phase(status.PhaseStopping)
-	return a.deps.Sidecar.Stop(ctx)
+	err := a.deps.Sidecar.Stop(ctx)
+	a.cancel()
+	return err
 }
