@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/bubbles/progress"
+	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	appruntime "github.com/jdtobe/gavel/internal/runtime"
@@ -47,6 +48,9 @@ type Model struct {
 	events       chan tea.Msg
 	generation   int
 	bar          progress.Model
+	cached       map[string]bool
+	previous     string
+	viewport     viewport.Model
 }
 type setupProgressMsg struct {
 	p          appruntime.PrefetchProgress
@@ -66,6 +70,11 @@ type tickMsg time.Time
 
 func New(deps Deps) Model {
 	m := Model{deps: deps, screen: "setup", selected: map[string]bool{appruntime.Model08B: true}, rows: make(map[string]appruntime.PrefetchProgress), bar: progress.New(progress.WithDefaultGradient(), progress.WithWidth(26))}
+	m.cached = make(map[string]bool)
+	m.viewport = viewport.New(90, 20)
+	for _, model := range deps.App.Models() {
+		m.cached[model.Name] = model.Cached
+	}
 	var err error
 	if deps.MemoryBytes != nil {
 		m.memory, err = deps.MemoryBytes()
@@ -138,6 +147,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case tea.KeyMsg:
+		if msg.String() == "esc" && (m.screen == "manage" || m.screen == "logs") {
+			if m.screen == "logs" {
+				m.screen = m.previous
+			} else {
+				m.screen = "ready"
+			}
+			return m, nil
+		}
 		switch msg.String() {
 		case "q", "ctrl+c":
 			if m.cancel != nil {
@@ -162,9 +179,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "r":
 				return m.beginSetup()
 			case "l":
-				m.notice = strings.Join(m.deps.App.Logs(), "\n")
+				m.previous = m.screen
+				m.screen = "logs"
+				m.viewport.SetContent(strings.Join(m.deps.App.Logs(), "\n"))
 				return m, nil
 			}
+			return m, nil
+		}
+		if m.screen == "ready" || m.screen == "manage" || m.screen == "logs" {
+			return m.launcherKey(msg)
+		}
+		if m.screen == "progress" && msg.String() == "l" {
+			m.previous = m.screen
+			m.screen = "logs"
+			m.viewport.SetContent(strings.Join(m.deps.App.Logs(), "\n"))
 			return m, nil
 		}
 		if m.screen == "setup" {
@@ -278,7 +306,7 @@ func (m Model) View() string {
 		return b.String() + "\nConsole: " + m.deps.App.ConsoleURL() + "\n"
 	case "progress":
 		var b strings.Builder
-		b.WriteString(header + "Downloading / Starting Kev…\n")
+		b.WriteString(header + "Downloading / Starting Kev… " + m.notice + "\n")
 		for _, item := range []string{"runtime", "adapter", "base", "model"} {
 			p := m.rows[item]
 			fraction := 0.0
@@ -298,6 +326,6 @@ func (m Model) View() string {
 		}
 		return header + m.err + "\n" + strings.Join(logs, "\n") + "\n[r] Retry  [m] Models/setup  [l] Logs  [q] Quit\n" + m.notice
 	default:
-		return header + "Ready\n"
+		return header + m.launcherView()
 	}
 }
