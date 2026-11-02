@@ -3,7 +3,7 @@
 ## Start here
 
 - Read `docs/superpowers/specs/2026-11-02-kev-playground-design.md` before changing architecture. It is the source of truth for scope, pinned versions, and non-goals.
-- This is a macOS Apple Silicon PoC. It is pre-implementation: only the entrypoint and version package exist.
+- This is an implemented macOS Apple Silicon PoC. The real-Kev multi-GB acceptance run is opt-in and has not yet been performed; normal tests never download models.
 
 ## Commands
 
@@ -12,6 +12,8 @@
 - `make test-web` — `node --test web/`
 - `make vet` — `go vet ./...`
 - `make build` — build `bin/gavel`
+- `make run` — launch setup/launcher TUI
+- `make e2e` — explicitly consent to real runtime/model downloads and a Metal smoke test (not CI)
 - Single Go test: `go test ./internal/version -run TestVersionDefault -v`
 - Required before a commit: `make vet && make test`.
 
@@ -32,16 +34,21 @@
 - The browser UI has no Node build step: plain HTML/CSS/ES modules embedded with `go:embed`. Keep pure logic in `web/model.js` for `node --test`.
 - Use `uv sync --frozen`; do not silently fall back to unpinned dependencies.
 - `GAVEL_HOME` overrides app data paths. Unit tests must use temp dirs and must never download models.
+- Offline after setup: the sidecar forces `HF_HUB_OFFLINE=1` and `TRANSFORMERS_OFFLINE=1`. Only explicit setup/prefetch enables network downloads.
 
 ## Layout
 
-- `cmd/gavel` — entrypoint (current skeleton).
-- `internal/version` — build version (current skeleton).
-- Planned per the design doc: `internal/runtime`, `internal/sidecar`, `internal/kevapi`, `internal/console`, `internal/tui`, `web/`.
+- `cmd/gavel` — entrypoint, flags, setup/launcher wiring.
+- `internal/version` — build version.
+- `internal/config`, `internal/runtime`, `internal/kevapi`, `internal/sidecar` — implemented runtime foundation; tests use fakes and helper subprocesses.
+- `internal/status`, `internal/app`, `internal/console`, `internal/tui` — orchestration, local proxy, and launcher.
+- `web/` — embedded HTML/CSS/ES modules; pure browser logic tests.
+- `e2e/` — opt-in real-Kev smoke test.
 - `.superpowers/` is local brainstorm state; it is gitignored.
 
 ## Workflow
 
+- Always push feature branches and create a pull request for completed work. Never merge a PR or feature branch yourself; only the human user may merge it. Do not enable auto-merge.
 - TDD: write a failing test first, then the smallest implementation, then commit at a green breakpoint.
 - Every commit must pass `make vet && make test`.
 - Keep browser logic testable without a browser; only thin DOM glue belongs in the page.

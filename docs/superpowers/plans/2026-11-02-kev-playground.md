@@ -301,6 +301,11 @@ git commit -m "feat: add Kev request types and validation"
   - `(*Setup).EnsureUV(ctx) error`, `EnsurePython(ctx) error`, `EnsureKev(ctx) error`
   - `(*Setup).CheckDisk(path string, required uint64) error`
   - `(*Setup).CheckMemory(model string) error`
+  - `(*Setup).KevDir() string` — `<RuntimeDir>/kev/<KevSHA>`
+  - `(*Setup).VenvPython() string` — `<KevDir>/.venv/bin/python`
+  - `runtime.ModelSize(model string) (uint64, error)` — 0.8B = 1.71 GB, 4B = 8.85 GB
+  - `runtime.ModelMinMemory(model string) (uint64, error)` — 0.8B = 8 GiB, 4B = 32 GiB
+  - `runtime.RequiredDisk(models []string) (uint64, error)` — selected model bytes + `RuntimeDiskBytes` (2.5 GiB: 1.5 GB runtime + 1 GiB headroom); errors on an empty selection
 
 - [ ] **Step 1: Write the failing checksum test**
 
@@ -372,13 +377,13 @@ func TestCheckMemoryBlocks4BBelow32GB(t *testing.T) {
 }
 ```
 
-Cover: 0.8B allowed at 8 GB, blocked at 7 GB; 4B allowed at 32 GB; disk shortfall error includes required/free bytes.
+Cover: 0.8B allowed at 8 GB, blocked at 7 GB; 4B allowed at 32 GB; disk shortfall error includes required/free bytes; `ModelSize` returns the sizes above and an error for an unknown model; `ModelMinMemory` returns the thresholds; `RequiredDisk` sums selected sizes once and returns an error for an empty selection.
 
 - [ ] **Step 7: Add `golang.org/x/sys` and implement disk/memory checks**
 
 Run `go get golang.org/x/sys@latest && go mod tidy` (pin the resolved version in `go.mod`).
 
-`disk.go` uses `unix.Statfs` on the target directory. `memory.go` uses `unix.SysctlUint64("hw.memsize")`. Keep both behind injectable funcs for tests.
+`disk.go` uses `unix.Statfs` on the target directory. `memory.go` uses `unix.SysctlUint64("hw.memsize")`. Keep both behind injectable funcs for tests. Put `ModelSize` and `RequiredDisk` in `pins.go` (or a small `sizes.go`) as pure functions, and `KevDir`/`VenvPython` in `setup.go`.
 
 Run: `go test ./internal/runtime -v && make vet`
 Expected: PASS.
@@ -403,7 +408,7 @@ git commit -m "feat: add uv, Python, and Kev runtime bootstrap"
 **Interfaces:**
 - Consumes: `runtime.Setup`, `runtime.Runner`.
 - Produces:
-  - `runtime.PrefetchProgress{Event, Item, File string; Done, Total int64}`
+  - `runtime.PrefetchProgress{Event, Item, File, Message string; Done, Total int64}`
   - `runtime.ParsePrefetchLine(string) (PrefetchProgress, error)`
   - `(*Setup).Prefetch(ctx context.Context, model string, onProgress func(PrefetchProgress)) error`
   - `runtime.PrefetchScript` embedded with `go:embed prefetch.py`
@@ -485,6 +490,7 @@ git commit -m "feat: prefetch Kev models with structured progress"
   - `(*Manager).WaitReady(ctx context.Context, timeout time.Duration) (ModelInfo, error)`
   - `(*Manager).Stop(ctx context.Context) error`
   - `(*Manager).URL() string`
+  - `(*Manager).Logs() []string` — ANSI-stripped snapshot of the 1,000-line ring buffer
   - `sidecar.AcquireLock(path string) (release func() error, err error)`
   - `sidecar.ReapOrphan(stateFile string) error`
   - `sidecar.WriteState(stateFile string, pid, pgid int) error`
@@ -523,8 +529,10 @@ func TestHelperProcess(t *testing.T) {
 
 Tests:
 - `Start` launches the helper with `Setpgid: true`, writes `sidecar.json`, and `Stop` kills the process group (helper exits).
+- `Start` sets the exact environment, including `HF_HUB_OFFLINE=1` and `TRANSFORMERS_OFFLINE=1` (helper echoes its env or the fake command records it).
 - `WaitReady` works against the helper.
 - An unexpected helper exit is detected.
+- `Logs` returns ANSI-stripped lines and caps at 1,000 entries.
 - `ReapOrphan` kills a live recorded PID and removes the state file.
 - `AcquireLock` rejects a second acquisition in the same process and releases on `close`.
 
@@ -688,7 +696,7 @@ git commit -m "feat: serve console and proxy Kev requests"
 - Consumes: `config`, `runtime`, `sidecar`, `console`, `status`.
 - Produces:
   - `app.Runtime` interface: `EnsureUV`, `EnsurePython`, `EnsureKev`, `Prefetch`, `CheckDisk`, `CheckMemory` (signatures match `*runtime.Setup`).
-  - `app.Sidecar` interface: `Start(ctx, model string, port int) error`, `WaitReady(ctx, timeout) (sidecar.ModelInfo, error)`, `Stop(ctx) error`, `URL() string`.
+  - `app.Sidecar` interface: `Start(ctx, model string, port int) error`, `WaitReady(ctx, timeout) (sidecar.ModelInfo, error)`, `Stop(ctx) error`, `URL() string`, `Logs() []string`.
   - `app.Console` interface: `Start(ctx) (string, error)`, `WaitIdle(ctx) error`.
   - `app.Deps{Paths runtime.Paths; Config config.Config; Runtime Runtime; Sidecar Sidecar; Console Console; Listen func() (net.Listener, error)}` (`Listen` defaults to `net.Listen("tcp", "127.0.0.1:0")` when nil).
   - `app.App{...}` with:
@@ -699,6 +707,7 @@ git commit -m "feat: serve console and proxy Kev requests"
     - `Restart(ctx context.Context) error`
     - `SwitchModel(ctx context.Context, model string) error`
     - `Models() []status.ModelState` (`status.ModelState{Name string; Cached, Active bool}`)
+    - `Logs() []string` — delegates to the sidecar ring buffer for the TUI
     - `StartConsole(ctx context.Context) (string, error)` — starts the embedded console HTTP server before setup; safe to call once
     - `Stop(ctx context.Context) error`
     - `ConsoleURL() string`
@@ -736,9 +745,10 @@ func TestStartTransitionsToReady(t *testing.T) {
 Use fakes for `Runtime`, `Sidecar`, and `Console`. Cover:
 - `Setup` reports `PhaseDownloading`, then `PhaseStarting`, then `PhaseReady`;
 - setup failure -> `PhaseError` with message and downloads are not retried automatically;
+- `Setup` calls `CheckDisk(Paths.RuntimeDir, runtime.RequiredDisk(models))` and `CheckMemory` for each selected model before downloading;
 - config is not written on failed start;
 - config is written with the active model only after ready;
-- offline env is passed to the sidecar (assert via the fake);
+- `Logs` returns the sidecar's lines;
 - `Restart` returns `503` to new requests while it waits, waits up to 30 s for `Console.WaitIdle`, then stops/starts;
 - `Restart` with a hung in-flight request cancels after the 30 s budget and still reaches `PhaseReady`;
 - `SwitchModel` writes config only after ready and keeps the previous model on failure;
@@ -753,7 +763,7 @@ Expected: FAIL with `undefined: App`.
 
 - [ ] **Step 3: Implement the app**
 
-Keep the app free of Bubble Tea and HTTP details. Expose plain methods and let the TUI call them through commands. Use a mutex around status/config writes. Use a `phase` guard so `console` returns `503` while restarting. Use `context.WithTimeout` for restart grace. Accept the fixed 30 s grace as a package constant (`restartGrace = 30 * time.Second`) so tests can assert it without sleeping. Pick the sidecar port by listening on `127.0.0.1:0`, recording the port, and closing the listener before `Sidecar.Start`; keep it injectable (`Listen func() (net.Listener, error)`) so tests can supply a fake port.
+Keep the app free of Bubble Tea and HTTP details. Expose plain methods and let the TUI call them through commands. Use a mutex around status/config writes. Use a `phase` guard so `console` returns `503` while restarting. Use `context.WithTimeout` for restart grace. Accept the fixed 30 s grace as a package constant (`restartGrace = 30 * time.Second`) so tests can assert it without sleeping. Pick the sidecar port by listening on `127.0.0.1:0`, recording the port, and closing the listener before `Sidecar.Start`; keep it injectable (`Listen func() (net.Listener, error)`) so tests can supply a fake port. `Setup` runs `CheckDisk`/`CheckMemory` before `Runtime.Ensure*`, and `Start` is the only place that calls `Sidecar.Start`/`WaitReady`.
 
 - [ ] **Step 4: Implement `OpenConsole`**
 
@@ -784,7 +794,7 @@ git commit -m "feat: orchestrate setup, sidecar, and console state"
 **Interfaces:**
 - Consumes: `status`, `runtime`.
 - Produces:
-  - `tui.App` interface with `Status() status.Status`, `Setup(ctx, models, onProgress) error`, `Start(ctx) error`, `Restart(ctx) error`, `SwitchModel(ctx, model) error`, `Models() []status.ModelState`, `StartConsole(ctx) (string, error)`, `Stop(ctx) error`, `ConsoleURL() string`, `OpenConsole() error` (matches `*app.App`).
+  - `tui.App` interface with `Status() status.Status`, `Setup(ctx, models, onProgress) error`, `Start(ctx) error`, `Restart(ctx) error`, `SwitchModel(ctx, model) error`, `Models() []status.ModelState`, `Logs() []string`, `StartConsole(ctx) (string, error)`, `Stop(ctx) error`, `ConsoleURL() string`, `OpenConsole() error` (matches `*app.App`).
   - `tui.Deps{App App; OpenBrowser func(string) error; MemoryBytes func() (uint64, error); DiskFree func(string) (uint64, error)}`
   - `tui.New(Deps) Model`
   - `tui.Model` implementing `tea.Model`
@@ -909,7 +919,7 @@ Expected: FAIL with missing `readyModel`/actions.
 
 - [ ] **Step 3: Implement ready/manage/logs**
 
-Status line format: `<model> · <backend> · <host:port> · <phase>`. Use `App.Status()`. Logs use `bubbles/viewport` with the ring buffer from the sidecar. Manage lists models with size and cached/active markers from `App.Models()`; `enter` on a cached model calls `App.SwitchModel` and waits for `serverReadyMsg` before marking it active.
+Status line format: `<model> · <backend> · <host:port> · <phase>`. Use `App.Status()`. Logs use `bubbles/viewport` over `App.Logs()`. Manage lists models with size (`runtime.ModelSize`) and cached/active markers from `App.Models()`; `space` downloads newly selected models through `App.Setup`, and `enter` on a cached model calls `App.SwitchModel` and waits for `serverReadyMsg` before marking it active.
 
 - [ ] **Step 4: Run tests and commit**
 
@@ -1108,7 +1118,7 @@ Expected: FAIL with `undefined: run`.
 `run`:
 1. Resolve paths.
 2. Load config.
-3. Create the app (runtime setup, sidecar, console).
+3. Create the app (runtime setup, sidecar, console). Construct `runtime.Setup`, then `sidecar.Manager{Python: setup.VenvPython(), ...}`, then `console.New(app, ...)`, then `app.New(...)`.
 4. Call `app.StartConsole(ctx)` at launch, before setup, so the browser can show progress.
 5. Start the Bubble Tea program.
 6. On exit, stop the sidecar, cancel the console server context, and release the lock.

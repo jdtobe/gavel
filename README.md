@@ -4,11 +4,11 @@ A local Kev playground for macOS on Apple Silicon. One Go binary manages a pinne
 `uv`/Python/Kev sidecar and serves a three-column browser console for typed
 decisions.
 
-**Status:** design stage. The design is in
+**Status:** implemented PoC; automated tests and a stub-backed browser smoke test
+pass. The multi-GB real-Kev acceptance run remains opt-in. The design is in
 [`docs/superpowers/specs/2026-11-02-kev-playground-design.md`](docs/superpowers/specs/2026-11-02-kev-playground-design.md).
-The current skeleton only reports its version.
 
-## What it will do
+## What it does
 
 - TUI first-run setup: choose models, download the runtime and weights with
   progress, cancel/retry, and read logs.
@@ -25,19 +25,49 @@ Kev is a decision model, not a chat model. This app does not generate text.
 - macOS on Apple Silicon (arm64).
 - Go 1.27+.
 - Node 26+ for browser-logic tests.
-- ~1.7 GB for Kev-0.8B weights, or ~8.7 GB for Kev-4B, plus the managed
+- At least 8 GiB unified memory for Kev-0.8B; 32 GiB for Kev-4B.
+- ~1.71 GB for Kev-0.8B weights, or ~8.85 GB for Kev-4B, plus the managed
   Python runtime.
+
+## Run
+
+```sh
+make build
+bin/gavel             # setup/launcher TUI
+bin/gavel --version
+```
+
+On first run, select models and press Enter to consent to downloading the pinned
+runtime and weights. Kev-0.8B is selected by default; Kev-4B is opt-in. First load
+may take several minutes. Press `o` at Ready to open the console and try the preset.
+Use `m` for model management, `r` to restart, `l` for logs, and `q` to stop and quit.
+`Esc` cancels a download without deleting completed caches.
+
+Both HTTP servers bind to `127.0.0.1`. Ordinary launches use only local model
+caches (`HF_HUB_OFFLINE=1`, `TRANSFORMERS_OFFLINE=1`); missing cache files require
+explicit setup again. There is no unpinned dependency fallback.
+
+Config/runtime/logs live in `~/Library/Application Support/gavel/`; model and uv
+caches live in `~/Library/Caches/gavel/`. Set `GAVEL_HOME` to put everything beneath
+one directory, e.g. `GAVEL_HOME="$HOME/gavel-dev" bin/gavel`. The app never deletes
+model caches automatically.
 
 ## Development
 
 ```sh
-make test        # Go tests + browser-logic tests (skipped until web/ exists)
+make test        # Go tests + browser-logic tests; no model downloads
 make test-go     # go test ./...
 make test-web    # node --test web/
 make vet         # go vet ./...
 make build       # build ./cmd/gavel into bin/gavel
 make run         # go run ./cmd/gavel
+make e2e         # opt-in: real runtime/model downloads into a temp directory
 ```
+
+`make e2e` explicitly opts into a multi-GB download; it is skipped in normal tests
+and CI. It builds a fresh runtime, starts Kev, submits all three question types,
+and verifies clean shutdown. Unit tests use temporary paths and fake commands or
+small helper processes instead of real models.
 
 Run one Go test:
 

@@ -1,0 +1,4 @@
+{"event":"phase","item":"adapter"}
+{"event":"progress","item":"base","file":"model-00001.safetensors","done":100,"total":1000}
+{"event":"done","item":"base"}
+{"event":"error","item":"base","message":"network down"}
