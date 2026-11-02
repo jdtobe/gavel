@@ -50,5 +50,5 @@ type Response struct {
 	Model     string            `json:"model"`
 	Answers   map[string]Answer `json:"answers"`
 	Usage     Usage             `json:"usage"`
-	LatencyMS int               `json:"latency_ms"`
+	LatencyMS float64           `json:"latency_ms"`
 }
