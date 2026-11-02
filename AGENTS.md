@@ -48,6 +48,7 @@
 
 ## Workflow
 
+- Always push feature branches and create a pull request for completed work. Never merge a PR or feature branch yourself; only the human user may merge it. Do not enable auto-merge.
 - TDD: write a failing test first, then the smallest implementation, then commit at a green breakpoint.
 - Every commit must pass `make vet && make test`.
 - Keep browser logic testable without a browser; only thin DOM glue belongs in the page.
