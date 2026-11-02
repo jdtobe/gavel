@@ -196,6 +196,29 @@ func TestSetupTransitionsToReady(t *testing.T) {
 		t.Fatal(a.deps.Runtime.(*fakeRuntime).calls)
 	}
 }
+
+func TestSetupReportsRuntimeBootstrapProgress(t *testing.T) {
+	a := newTestApp(t)
+	var events []appruntime.PrefetchProgress
+	if err := a.Setup(context.Background(), []string{appruntime.Model08B}, func(p appruntime.PrefetchProgress) {
+		if p.Item == "runtime" {
+			events = append(events, p)
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 4 {
+		t.Fatalf("runtime bootstrap has no visible progress: %#v", events)
+	}
+	for _, p := range events[:3] {
+		if p.Event != "phase" || p.File == "" {
+			t.Fatalf("missing active runtime step: %#v", p)
+		}
+	}
+	if events[3].Event != "done" {
+		t.Fatalf("runtime row never completed: %#v", events)
+	}
+}
 func TestStartTransitionsToReady(t *testing.T) {
 	a := newTestApp(t)
 	if err := a.Start(context.Background()); err != nil {

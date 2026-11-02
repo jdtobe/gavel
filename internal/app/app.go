@@ -138,10 +138,24 @@ func (a *App) Setup(ctx context.Context, models []string, cb func(appruntime.Pre
 		}
 	}
 	a.phase(status.PhaseDownloading)
-	for _, step := range []func(context.Context) error{a.deps.Runtime.EnsureUV, a.deps.Runtime.EnsurePython, a.deps.Runtime.EnsureKev} {
-		if err := step(ctx); err != nil {
+	steps := []struct {
+		label string
+		run   func(context.Context) error
+	}{
+		{"Downloading and verifying uv", a.deps.Runtime.EnsureUV},
+		{"Installing Python 3.13", a.deps.Runtime.EnsurePython},
+		{"Syncing pinned Kev dependencies", a.deps.Runtime.EnsureKev},
+	}
+	for _, step := range steps {
+		if cb != nil {
+			cb(appruntime.PrefetchProgress{Event: "phase", Item: "runtime", File: step.label})
+		}
+		if err := step.run(ctx); err != nil {
 			return a.fail(err)
 		}
+	}
+	if cb != nil {
+		cb(appruntime.PrefetchProgress{Event: "done", Item: "runtime"})
 	}
 	for _, m := range models {
 		if err := a.deps.Runtime.Prefetch(ctx, m, cb); err != nil {
