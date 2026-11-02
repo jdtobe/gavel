@@ -408,7 +408,7 @@ git commit -m "feat: add uv, Python, and Kev runtime bootstrap"
 **Interfaces:**
 - Consumes: `runtime.Setup`, `runtime.Runner`.
 - Produces:
-  - `runtime.PrefetchProgress{Event, Item, File string; Done, Total int64}`
+  - `runtime.PrefetchProgress{Event, Item, File, Message string; Done, Total int64}`
   - `runtime.ParsePrefetchLine(string) (PrefetchProgress, error)`
   - `(*Setup).Prefetch(ctx context.Context, model string, onProgress func(PrefetchProgress)) error`
   - `runtime.PrefetchScript` embedded with `go:embed prefetch.py`

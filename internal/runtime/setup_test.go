@@ -23,6 +23,7 @@ type runCall struct {
 type fakeRunner struct {
 	calls  []runCall
 	stdout string
+	stderr string
 	err    error
 	called bool
 }
@@ -32,6 +33,9 @@ func (f *fakeRunner) Run(ctx context.Context, name string, args []string, env []
 	f.calls = append(f.calls, runCall{name: name, args: append([]string(nil), args...), env: append([]string(nil), env...)})
 	if f.stdout != "" {
 		_, _ = io.WriteString(stdout, f.stdout)
+	}
+	if f.stderr != "" {
+		_, _ = io.WriteString(stderr, f.stderr)
 	}
 	return f.err
 }
