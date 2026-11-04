@@ -119,6 +119,39 @@ func TestRecoverySelectsRequestedCachedModel(t *testing.T) {
 		t.Fatal(got)
 	}
 }
+func TestSetupSkipsPrefetchForCachedModel(t *testing.T) {
+	a := newTestApp(t)
+	a.cfg.DownloadedModels = []string{appruntime.Model08B}
+	if err := a.Setup(context.Background(), []string{appruntime.Model08B}, nil); err != nil {
+		t.Fatal(err)
+	}
+	for _, call := range a.deps.Runtime.(*fakeRuntime).calls {
+		if strings.HasPrefix(call, "prefetch:") {
+			t.Fatalf("cached model was prefetched: %v", a.deps.Runtime.(*fakeRuntime).calls)
+		}
+	}
+	if got := a.deps.Sidecar.(*fakeSidecar).starts; len(got) != 1 || got[0] != appruntime.Model08B {
+		t.Fatal(got)
+	}
+}
+func TestSetupForgetsCachedModelWhenStartFails(t *testing.T) {
+	a := newTestApp(t)
+	a.cfg.DownloadedModels = []string{appruntime.Model08B}
+	a.deps.Sidecar.(*fakeSidecar).err = errors.New("missing weights")
+	if err := a.Setup(context.Background(), []string{appruntime.Model08B}, nil); err == nil {
+		t.Fatal("missing error")
+	}
+	if contains(a.cfg.DownloadedModels, appruntime.Model08B) {
+		t.Fatalf("cache marker kept: %v", a.cfg.DownloadedModels)
+	}
+	got, err := config.Load(a.deps.Paths.ConfigFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if contains(got.DownloadedModels, appruntime.Model08B) {
+		t.Fatalf("persisted cache marker: %v", got.DownloadedModels)
+	}
+}
 func TestRecoveryDiskExcludesCachedWeights(t *testing.T) {
 	a := newTestApp(t)
 	a.deps.Runtime.(*fakeRuntime).installed = true

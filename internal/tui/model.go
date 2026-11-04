@@ -70,11 +70,16 @@ type logLineMsg string
 type tickMsg time.Time
 
 func New(deps Deps) Model {
-	m := Model{deps: deps, screen: "setup", selected: map[string]bool{appruntime.Model08B: true}, rows: make(map[string]appruntime.PrefetchProgress), bar: progress.New(progress.WithDefaultGradient(), progress.WithWidth(26))}
+	m := Model{deps: deps, screen: "setup", selected: map[string]bool{appruntime.Model08B: true}, rows: make(map[string]appruntime.PrefetchProgress), bar: progress.New(progress.WithGradient("#146858", "#8fd3b8"), progress.WithWidth(26))}
 	m.cached = make(map[string]bool)
 	m.viewport = viewport.New(90, 20)
 	for _, model := range deps.App.Models() {
 		m.cached[model.Name] = model.Cached
+		if model.Active {
+			for _, id := range []string{appruntime.Model08B, appruntime.Model4B} {
+				m.selected[id] = id == model.Name
+			}
+		}
 	}
 	var err error
 	if deps.MemoryBytes != nil {
@@ -93,6 +98,8 @@ func New(deps Deps) Model {
 	}
 	if deps.App.Status().Phase == status.PhaseReady {
 		m.screen = "ready"
+	} else if deps.AutoStart {
+		m.screen = "progress"
 	}
 	return m
 }
@@ -166,6 +173,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, tea.Quit
 		case "esc":
+			if m.screen == "progress" && m.cancel == nil {
+				return m, nil
+			}
 			if m.cancel != nil {
 				m.cancel()
 				m.cancel = nil
@@ -226,6 +236,18 @@ func (m Model) chosen() []string {
 		}
 	}
 	return models
+}
+func (m Model) allChosenCached() bool {
+	models := m.chosen()
+	if len(models) == 0 {
+		return false
+	}
+	for _, id := range models {
+		if !m.cached[id] {
+			return false
+		}
+	}
+	return true
 }
 func (m Model) canDownload() bool {
 	models := m.chosen()
@@ -306,32 +328,54 @@ func (m Model) View() string {
 			if m.memory < need {
 				reason = fmt.Sprintf(" (requires %d GiB RAM)", need>>30)
 			}
+			if m.cached[id] {
+				reason += " (cached)"
+			}
 			fmt.Fprintf(&b, "%s [%s] %s ~%.2f GB%s\n", cursor, mark, id, float64(size)/1e9, reason)
 		}
 		fmt.Fprintf(&b, "\nRAM: %d GiB · Disk free: %.1f GB\n", m.memory>>30, float64(m.free)/1e9)
-		if need, err := appruntime.RequiredDisk(m.chosen()); err == nil {
+		if m.allChosenCached() {
+			b.WriteString("Downloaded; ready to start.\n")
+		} else if need, err := appruntime.RequiredDisk(m.chosen()); err == nil {
 			fmt.Fprintf(&b, "Required: %.1f GB\n", float64(need)/1e9)
 		}
-		b.WriteString("\n[enter] Download & start   [q] Quit\n" + m.notice)
+		action := "Download & start"
+		if m.allChosenCached() {
+			action = "Start"
+		}
+		fmt.Fprintf(&b, "\n[enter] %s   [q] Quit\n%s", action, m.notice)
 		if !m.canDownload() {
 			b.WriteString("\nDownload disabled: select a supported model and ensure sufficient disk space.")
 		}
 		return b.String() + "\nConsole: " + m.deps.App.ConsoleURL() + "\n"
 	case "progress":
 		var b strings.Builder
-		b.WriteString(header + "Downloading / Starting Kev… " + m.notice + "\n")
-		for _, item := range []string{"runtime", "adapter", "base", "model"} {
-			p := m.rows[item]
-			fraction := 0.0
-			if p.Total > 0 {
-				fraction = float64(p.Done) / float64(p.Total)
-			}
-			if p.Event == "done" {
-				fraction = 1
-			}
-			fmt.Fprintf(&b, "%s %s %s\n", item, m.bar.ViewAs(fraction), p.File)
+		cached := m.allChosenCached()
+		title := "Downloading / Starting Kev…"
+		if cached {
+			title = "Starting Kev…"
 		}
-		return b.String() + "\n[esc] cancel · [q] Quit\nConsole: " + m.deps.App.ConsoleURL() + "\n"
+		b.WriteString(header + title + " " + m.notice + "\n")
+		if cached {
+			b.WriteString("\nModel cached; loading Kev can take a minute.\n")
+		} else {
+			for _, item := range []string{"runtime", "adapter", "base", "model"} {
+				p := m.rows[item]
+				fraction := 0.0
+				if p.Total > 0 {
+					fraction = float64(p.Done) / float64(p.Total)
+				}
+				if p.Event == "done" {
+					fraction = 1
+				}
+				fmt.Fprintf(&b, "%s %s %s\n", item, m.bar.ViewAs(fraction), p.File)
+			}
+		}
+		hint := "[esc] cancel · [q] Quit"
+		if m.cancel == nil {
+			hint = "[q] Quit"
+		}
+		return b.String() + "\n" + hint + "\nConsole: " + m.deps.App.ConsoleURL() + "\n"
 	case "error":
 		logs := m.deps.App.Logs()
 		if len(logs) > 20 {

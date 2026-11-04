@@ -97,7 +97,11 @@ func (m Model) launcherView() string {
 			size, _ := appruntime.ModelSize(id)
 			text += fmt.Sprintf("%s %s %.2f GB · cached=%t · active=%t · selected=%t\n", cursor, id, float64(size)/1e9, m.cached[id], m.deps.App.Status().Model == id, m.selected[id])
 		}
-		return text + "\n[space] Select additional models · [enter] Switch/download · [esc] Back\n"
+		action := "Switch/download"
+		if m.cached[[]string{appruntime.Model08B, appruntime.Model4B}[m.focus]] {
+			action = "Switch"
+		}
+		return text + "\n[space] Select additional models · [enter] " + action + " · [esc] Back\n"
 	}
 	s := m.deps.App.Status()
 	return fmt.Sprintf("%s · %s · %s · %s\n\n[o] Open console in browser\n[m] Manage models\n[r] Restart Kev server\n[l] Show logs\n[q] Quit\n\n%s\n%s\n", s.Model, s.Backend, s.SidecarURL, s.Phase, m.deps.App.ConsoleURL(), m.notice)
