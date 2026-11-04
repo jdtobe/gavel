@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	appruntime "github.com/jdtobe/gavel/internal/runtime"
 	"github.com/jdtobe/gavel/internal/status"
 )
 
@@ -67,6 +68,16 @@ func TestReadyScreens(t *testing.T) {
 	changed, _ := m.Update(serverErrMsg{err: errors.New("crashed")})
 	if changed.(Model).screen != "error" {
 		t.Fatal("missing error screen")
+	}
+}
+func TestManageCachedActionSaysSwitch(t *testing.T) {
+	m := readyModel()
+	m.screen = "manage"
+	m.focus = 0
+	m.cached = map[string]bool{appruntime.Model08B: true}
+	view := m.launcherView()
+	if !strings.Contains(view, "[enter] Switch") || strings.Contains(view, "Switch/download") {
+		t.Fatalf("cached model still offers a download: %s", view)
 	}
 }
 func TestManageCachedSwitchWaits(t *testing.T) {

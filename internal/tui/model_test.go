@@ -93,6 +93,41 @@ func TestCachedRecoveryNeedsOnlyHeadroom(t *testing.T) {
 		t.Fatal("cached recovery blocked by full download accounting")
 	}
 }
+func TestCachedSetupOffersStart(t *testing.T) {
+	m := testModel(64<<30, 1<<40)
+	m.cached[appruntime.Model08B] = true
+	m.deps.RuntimeInstalled = true
+	view := m.View()
+	if !strings.Contains(view, "[enter] Start") || strings.Contains(view, "[enter] Download & start") {
+		t.Fatalf("cached model still asks to download: %s", view)
+	}
+	if !strings.Contains(view, "(cached)") || !strings.Contains(view, "Downloaded; ready to start.") {
+		t.Fatalf("cached state not visible: %s", view)
+	}
+}
+func TestAutoStartSkipsSetupScreen(t *testing.T) {
+	m := New(Deps{App: &fakeApp{}, AutoStart: true})
+	if m.screen != "progress" {
+		t.Fatalf("auto start showed %q instead of progress", m.screen)
+	}
+	m.cached[appruntime.Model08B] = true
+	view := m.View()
+	if !strings.Contains(view, "Starting Kev") || strings.Contains(view, "First run") {
+		t.Fatalf("auto start still looks like setup: %s", view)
+	}
+}
+func TestCachedProgressIsNotADownload(t *testing.T) {
+	m := testModel(64<<30, 1<<40)
+	m.cached[appruntime.Model08B] = true
+	m.screen = "progress"
+	view := m.View()
+	if !strings.Contains(view, "Starting Kev") || strings.Contains(view, "Downloading") {
+		t.Fatalf("cached start looks like a download: %s", view)
+	}
+	if !strings.Contains(view, "Model cached") {
+		t.Fatalf("missing cached note: %s", view)
+	}
+}
 func TestEnterStartsSelectedModels(t *testing.T) {
 	m := testModel(64<<30, 1<<40)
 	next, cmd := key(m, "enter")

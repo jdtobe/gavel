@@ -157,7 +157,15 @@ func (a *App) Setup(ctx context.Context, models []string, cb func(appruntime.Pre
 	if cb != nil {
 		cb(appruntime.PrefetchProgress{Event: "done", Item: "runtime"})
 	}
+	skipped := make(map[string]bool)
 	for _, m := range models {
+		a.mu.Lock()
+		cached := contains(a.cfg.DownloadedModels, m)
+		a.mu.Unlock()
+		if cached {
+			skipped[m] = true
+			continue
+		}
 		if err := a.deps.Runtime.Prefetch(ctx, m, cb); err != nil {
 			return a.fail(err)
 		}
@@ -173,7 +181,27 @@ func (a *App) Setup(ctx context.Context, models []string, cb func(appruntime.Pre
 		model = models[0]
 	}
 	a.mu.Unlock()
-	return a.start(ctx, model)
+	if err := a.start(ctx, model); err != nil {
+		a.forgetCached(skipped)
+		return err
+	}
+	return nil
+}
+func (a *App) forgetCached(skipped map[string]bool) {
+	if len(skipped) == 0 {
+		return
+	}
+	a.mu.Lock()
+	kept := a.cfg.DownloadedModels[:0]
+	for _, m := range a.cfg.DownloadedModels {
+		if !skipped[m] {
+			kept = append(kept, m)
+		}
+	}
+	a.cfg.DownloadedModels = kept
+	next := a.cfg
+	a.mu.Unlock()
+	_ = config.Save(a.deps.Paths.ConfigFile, next)
 }
 func (a *App) Start(ctx context.Context) error {
 	ctx, cancel := context.WithCancel(ctx)
