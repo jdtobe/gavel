@@ -24,7 +24,7 @@ func TestResponseRoundTrip(t *testing.T) {
 		t.Fatalf("Usage = %#v", got.Usage)
 	}
 	if got.LatencyMS != 495 {
-		t.Fatalf("LatencyMS = %d", got.LatencyMS)
+		t.Fatalf("LatencyMS = %v", got.LatencyMS)
 	}
 
 	choice, ok := got.Answers["department"]
@@ -95,6 +95,25 @@ func TestQuestionTypeValues(t *testing.T) {
 		if string(got) != want {
 			t.Fatalf("%q != %q", got, want)
 		}
+	}
+}
+
+func TestResponsePreservesFractionalLatency(t *testing.T) {
+	data := []byte(`{"model":"kev-latest","answers":{},"usage":{},"latency_ms":1754.9}`)
+	var response Response
+	if err := json.Unmarshal(data, &response); err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(response)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wire map[string]any
+	if err := json.Unmarshal(encoded, &wire); err != nil {
+		t.Fatal(err)
+	}
+	if wire["latency_ms"] != 1754.9 {
+		t.Fatalf("fractional latency lost: %s", encoded)
 	}
 }
 

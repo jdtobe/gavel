@@ -27,6 +27,20 @@ func TestReadyOOpensBrowser(t *testing.T) {
 		t.Fatal("browser not opened")
 	}
 }
+
+func TestBrowserOpenFailureShowsFallbackURL(t *testing.T) {
+	m := readyModel()
+	m.deps.OpenBrowser = func(string) error { return errors.New("open failed") }
+	next, cmd := key(m, "o")
+	updated, _ := next.Update(cmd())
+	next = updated.(Model)
+	if next.screen != "ready" {
+		t.Fatal("browser failure left Ready")
+	}
+	if view := next.View(); !strings.Contains(view, "Browser could not open") || !strings.Contains(view, m.deps.App.ConsoleURL()) {
+		t.Fatalf("missing visible fallback: %s", view)
+	}
+}
 func TestReadyScreens(t *testing.T) {
 	for _, k := range []string{"m", "l"} {
 		m := readyModel()

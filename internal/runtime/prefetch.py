@@ -18,7 +18,7 @@ def main(model):
 
 		def update(self, n=1):
 			result = super().update(n)
-			emit(event="progress", item=self.item, file=str(self.desc or ""),
+			emit(event="progress", item=self.item, file=str(getattr(self, "desc", "") or ""),
 				 done=int(self.n), total=int(self.total or 0))
 			return result
 
