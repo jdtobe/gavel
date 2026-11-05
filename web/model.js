@@ -4,9 +4,16 @@ export function emptyQuestion(type, id) {
 }
 
 const nonempty = value => typeof value === "string" && value.trim().length > 0;
+export const isStateValue = value => nonempty(value) || (value !== null && typeof value === "object");
+export function parseStateJSON(text) {
+	try {
+		const value = JSON.parse(text);
+		return isStateValue(value) ? {ok:true,value,error:""} : {ok:false,value:null,error:"State must be a JSON string, object, or array."};
+	} catch (error) { return {ok:false,value:null,error:error.message}; }
+}
 export function validateDraft(draft) {
 	const errors = {};
-	if (!nonempty(draft.state)) errors.state = "State is required.";
+	if (!isStateValue(draft.state) || draft.stateError) errors.state = draft.stateError || "State is required.";
 	if (!draft.questions?.length) errors.questions = "Add at least one question.";
 	const ids = new Set();
 	for (const [i,q] of (draft.questions || []).entries()) {
@@ -34,8 +41,50 @@ export function validateDraft(draft) {
 	return {ok:Object.keys(errors).length === 0,errors};
 }
 
-export function buildRequest(draft) {
-	return {state:draft.state, questions:Object.fromEntries(draft.questions.map(q => {
+export function validateQuestion(draft, question) {
+	return validateDraft({...draft,questions:[question]});
+}
+
+export function changedQuestionIds(draft) {
+	return draft.questions.filter(q=>q.dirty).map(q=>q.id);
+}
+function dirtyState(draft) {
+	draft.stateRev=(draft.stateRev || 0)+1;
+	for(const q of draft.questions) q.dirty=true;
+}
+export function editState(draft,text) {
+	if (draft.stateMode === "json") {
+		draft.stateText=text;
+		const result=parseStateJSON(text);
+		draft.stateError=result.error;
+		if(result.ok) draft.state=result.value;
+		dirtyState(draft);
+	} else if(draft.state !== text) {
+		draft.state=draft.stateText=text;
+		draft.stateError="";
+		dirtyState(draft);
+	}
+}
+export function switchStateMode(draft,mode) {
+	if(mode===draft.stateMode) return;
+	if(mode==="json") {
+		draft.stateText=JSON.stringify(draft.state,null,2);
+	} else {
+		const value=typeof draft.state === "string" ? draft.state : JSON.stringify(draft.state,null,2);
+		if(value!==draft.state) {draft.state=value;dirtyState(draft);}
+		draft.stateText=value;
+	}
+	draft.stateMode=mode;
+	draft.stateError="";
+}
+export function editQuestion(draft,question,change) {
+	change(question);
+	question.rev=(question.rev || 0)+1;
+	question.dirty=true;
+}
+
+export function buildRequest(draft, qids) {
+	return {state:draft.state, questions:Object.fromEntries(draft.questions.filter(q=>!qids || qids.includes(q.id)).map(q => {
 		const question = {type:q.type,instructions:q.instructions};
 		if(q.type === "choice") question.criteria = Object.fromEntries(q.options.map(o => [o.name,o.description ?? null]));
 		if(q.type === "score") question.criteria = [...q.levels];
