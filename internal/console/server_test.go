@@ -100,6 +100,32 @@ func TestProxy(t *testing.T) {
 	}
 }
 
+func TestProxyStructuredState(t *testing.T) {
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req kevapi.Request
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatal(err)
+		}
+		if string(req.State) != `{"nested":[1,true]}` {
+			t.Errorf("state = %s", req.State)
+		}
+		io.WriteString(w, `{"answers":{}}`)
+	}))
+	defer up.Close()
+	s := New(readyProvider(), func() string { return up.URL }, nil)
+	for _, tc := range []struct {
+		state  string
+		status int
+	}{{`{"nested":[1,true]}`, 200}, {`null`, 400}, {`42`, 400}} {
+		body := `{"state":` + tc.state + `,"questions":{"q":{"type":"noul","instructions":"yes?"}}}`
+		rr := httptest.NewRecorder()
+		s.Handler().ServeHTTP(rr, httptest.NewRequest("POST", "/api/systemone", strings.NewReader(body)))
+		if rr.Code != tc.status {
+			t.Errorf("state %s: %d %s", tc.state, rr.Code, rr.Body.String())
+		}
+	}
+}
+
 func TestProxyPassesThrough422ForOverlongState(t *testing.T) {
 	const body = `{"detail":"state too long"}`
 	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(422); io.WriteString(w, body) }))

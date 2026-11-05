@@ -1,6 +1,29 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { emptyQuestion, validateDraft, buildRequest, sortProbabilities, formatAnswer, parseErrorBody } from "./model.js";
+import * as model from "./model.js";
+
+test("structured state parsing and scoped request validation",()=>{
+	for(const input of ['"hello"','{}','[]']) assert.equal(model.parseStateJSON(input).ok,true);
+	for(const input of ['null','1','true','', '{']) assert.equal(model.parseStateJSON(input).ok,false);
+	const one={id:'one',type:'noul',instructions:'yes?'}, two={id:'two',type:'noul',instructions:''};
+	const d={state:{a:1},questions:[one,two]};
+	assert.equal(model.validateQuestion(d,one).ok,true);
+	assert.equal(model.validateDraft(d).ok,false);
+	assert.deepEqual(Object.keys(model.buildRequest(d,['one']).questions),['one']);
+});
+
+test("state modes and edits track revisions and dirty questions",()=>{
+	const d={state:'hello',stateMode:'text',stateText:'hello',stateError:'',stateRev:0,questions:[{id:'q',dirty:false,rev:0}]};
+	model.switchStateMode(d,'json');
+	assert.equal(d.stateText,'"hello"'); assert.equal(d.stateRev,0); assert.equal(d.questions[0].dirty,false);
+	model.editState(d,'{"a":1}');
+	assert.deepEqual(d.state,{a:1}); assert.equal(d.stateRev,1); assert.deepEqual(model.changedQuestionIds(d),['q']);
+	model.switchStateMode(d,'text');
+	assert.equal(d.state,'{\n  "a": 1\n}'); assert.equal(d.stateRev,2);
+	model.editQuestion(d,d.questions[0],q=>q.instructions='new');
+	assert.equal(d.questions[0].rev,1);
+});
 
 const draft = (q) => ({state:"ticket",questions:[q]});
 test("buildRequest maps choice options and preserves null descriptions",()=>{

@@ -118,7 +118,7 @@ func TestResponsePreservesFractionalLatency(t *testing.T) {
 }
 
 func TestRequestModelOmittedWhenEmpty(t *testing.T) {
-	data, err := json.Marshal(Request{State: "x", Questions: map[string]Question{}})
+	data, err := json.Marshal(Request{State: json.RawMessage(`"x"`), Questions: map[string]Question{}})
 	if err != nil {
 		t.Fatal(err)
 	}

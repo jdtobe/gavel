@@ -20,7 +20,7 @@ func (e *ValidationError) Error() string {
 
 // ValidateRequest mirrors Kev's request rules before anything is proxied.
 func ValidateRequest(r Request) error {
-	if strings.TrimSpace(r.State) == "" {
+	if !validState(r.State) {
 		return invalid("state", "state is required")
 	}
 	if len(r.Questions) == 0 {
@@ -61,6 +61,22 @@ func ValidateRequest(r Request) error {
 		}
 	}
 	return nil
+}
+
+func validState(raw json.RawMessage) bool {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || !json.Valid(trimmed) {
+		return false
+	}
+	switch trimmed[0] {
+	case '{', '[':
+		return true
+	case '"':
+		var value string
+		return json.Unmarshal(trimmed, &value) == nil && strings.TrimSpace(value) != ""
+	default:
+		return false
+	}
 }
 
 func invalid(field, format string, args ...any) error {

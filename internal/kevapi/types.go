@@ -16,7 +16,7 @@ const (
 
 // Request is the body Gavel forwards to Kev's /v1/systemone.
 type Request struct {
-	State     string              `json:"state"`
+	State     json.RawMessage     `json:"state"`
 	Model     string              `json:"model,omitempty"`
 	Questions map[string]Question `json:"questions"`
 }

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -17,7 +18,7 @@ func raw(t *testing.T, s string) json.RawMessage {
 }
 
 func withQuestion(q Question) Request {
-	return Request{State: "ticket", Questions: map[string]Question{"q1": q}}
+	return Request{State: json.RawMessage(`"ticket"`), Questions: map[string]Question{"q1": q}}
 }
 
 func manyChoice(t *testing.T, n int) json.RawMessage {
@@ -47,12 +48,58 @@ func manyLevels(t *testing.T, n int) json.RawMessage {
 }
 
 func TestValidateRejectsEmptyState(t *testing.T) {
-	err := ValidateRequest(Request{State: "   ", Questions: map[string]Question{
+	err := ValidateRequest(Request{State: json.RawMessage(`"   "`), Questions: map[string]Question{
 		"q1": {Type: TypeNoul, Instructions: "Is it true?"},
 	}})
 	var ve *ValidationError
 	if !errors.As(err, &ve) || ve.Field != "state" {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestStructuredStateRequest(t *testing.T) {
+	for _, state := range []string{`"ticket"`, `{}`, `[]`, `{"nested":[1,true]}`} {
+		t.Run(state, func(t *testing.T) {
+			var req Request
+			body := `{"state":` + state + `,"questions":{"q":{"type":"noul","instructions":"yes?"}}}`
+			if err := json.Unmarshal([]byte(body), &req); err != nil {
+				t.Fatalf("decode: %v", err)
+			}
+			if err := ValidateRequest(req); err != nil {
+				t.Fatalf("validation: %v", err)
+			}
+			out, err := json.Marshal(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var got map[string]json.RawMessage
+			if err := json.Unmarshal(out, &got); err != nil {
+				t.Fatal(err)
+			}
+			var wantValue, gotValue any
+			if err := json.Unmarshal([]byte(state), &wantValue); err != nil {
+				t.Fatal(err)
+			}
+			if err := json.Unmarshal(got["state"], &gotValue); err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(gotValue, wantValue) {
+				t.Fatalf("state = %s, want %s", got["state"], state)
+			}
+		})
+	}
+}
+
+func TestInvalidStateShapes(t *testing.T) {
+	for _, state := range []string{"", `{`, `null`, `12`, `true`, `false`, `""`, `" \t"`} {
+		t.Run(state, func(t *testing.T) {
+			req := withQuestion(Question{Type: TypeNoul, Instructions: "yes?"})
+			req.State = json.RawMessage(state)
+			var ve *ValidationError
+			if err := ValidateRequest(req); !errors.As(err, &ve) || ve.Field != "state" {
+				t.Fatalf("state %q: %v", state, err)
+			}
+		})
 	}
 }
 
@@ -63,7 +110,7 @@ func TestValidateAcceptsValidRequests(t *testing.T) {
 	}{
 		{
 			name: "all three types",
-			req: Request{State: "ticket", Questions: map[string]Question{
+			req: Request{State: json.RawMessage(`"ticket"`), Questions: map[string]Question{
 				"department":  {Type: TypeChoice, Instructions: "pick", Criteria: raw(t, `{"returns":"refunds","billing":null}`)},
 				"escalate":    {Type: TypeNoul, Instructions: "urgent?"},
 				"frustration": {Type: TypeScore, Instructions: "how frustrated?", Criteria: raw(t, `["Calm","Frustrated"]`)},
@@ -115,17 +162,17 @@ func TestValidateRejectsInvalidRequests(t *testing.T) {
 	}{
 		{
 			name:  "empty state",
-			req:   Request{State: " \n\t", Questions: map[string]Question{"q1": {Type: TypeNoul, Instructions: "x"}}},
+			req:   Request{State: json.RawMessage(`" \n\t"`), Questions: map[string]Question{"q1": {Type: TypeNoul, Instructions: "x"}}},
 			field: "state",
 		},
 		{
 			name:  "zero questions",
-			req:   Request{State: "ticket"},
+			req:   Request{State: json.RawMessage(`"ticket"`)},
 			field: "questions",
 		},
 		{
 			name:  "empty question id",
-			req:   Request{State: "ticket", Questions: map[string]Question{"": {Type: TypeNoul, Instructions: "x"}}},
+			req:   Request{State: json.RawMessage(`"ticket"`), Questions: map[string]Question{"": {Type: TypeNoul, Instructions: "x"}}},
 			field: "questions",
 		},
 		{
